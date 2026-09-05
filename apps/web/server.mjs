@@ -23,11 +23,11 @@ const HOP_BY_HOP_HEADERS = new Set([
 ])
 const CONTENT_TYPES = new Map([
   ['.css', 'text/css; charset=utf-8'],
-  ['.ico', 'image/x-icon'],
+  ['.ico', 'image/x-icon; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'],
   ['.json', 'application/json; charset=utf-8'],
   ['.png', 'image/png'],
-  ['.svg', 'image/svg+xml'],
+  ['.svg', 'image/svg+xml; charset=utf-8'],
   ['.txt', 'text/plain; charset=utf-8'],
   ['.webp', 'image/webp']
 ])
@@ -47,18 +47,22 @@ const isProxyPath = (pathname) =>
 /** Build fetch-compatible headers without forwarding connection-specific values. */
 const buildForwardHeaders = (request) => {
   const headers = new Headers()
+
   for (const [name, value] of Object.entries(request.headers)) {
     if (value === undefined || HOP_BY_HOP_HEADERS.has(name.toLowerCase()) || name === 'host') {
       continue
     }
+
     if (Array.isArray(value)) {
       for (const item of value) headers.append(name, item)
     } else {
       headers.set(name, value)
     }
   }
+
   if (request.headers.host) headers.set('x-forwarded-host', request.headers.host)
   headers.set('x-forwarded-proto', request.socket.encrypted ? 'https' : 'http')
+
   return headers
 }
 
@@ -68,10 +72,12 @@ const toFetchRequest = (request, targetUrl) => {
     headers: buildForwardHeaders(request),
     method: request.method ?? 'GET'
   }
+
   if (init.method !== 'GET' && init.method !== 'HEAD') {
     init.body = request
     init.duplex = 'half'
   }
+
   return new Request(targetUrl, init)
 }
 
@@ -79,29 +85,38 @@ const toFetchRequest = (request, targetUrl) => {
 const writeFetchResponse = async (response, serverResponse, method) => {
   serverResponse.statusCode = response.status
   serverResponse.statusMessage = response.statusText
+
   for (const [name, value] of response.headers) {
-    if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) serverResponse.setHeader(name, value)
+    if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) {
+      serverResponse.setHeader(name, value)
+    }
   }
+
   if (method === 'HEAD' || !response.body) {
     serverResponse.end()
     return
   }
+
   await pipeline(Readable.fromWeb(response.body), serverResponse)
 }
 
 /** Resolve a request path to a safe file underneath the built client directory. */
 const resolveStaticFile = async (clientDirectory, pathname) => {
   let decodedPath
+
   try {
     decodedPath = decodeURIComponent(pathname)
   } catch {
     return null
   }
+
   const candidate = path.resolve(clientDirectory, `.${decodedPath}`)
   const relativePath = path.relative(clientDirectory, candidate)
+
   if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
     return null
   }
+
   try {
     return (await stat(candidate)).isFile() ? candidate : null
   } catch {
@@ -112,21 +127,30 @@ const resolveStaticFile = async (clientDirectory, pathname) => {
 /** Serve a built client file and return whether the request was handled. */
 const serveStaticFile = async (request, response, clientDirectory, pathname) => {
   if (request.method !== 'GET' && request.method !== 'HEAD') return false
+
   const filePath = await resolveStaticFile(clientDirectory, pathname)
+
   if (!filePath) return false
 
   const extension = path.extname(filePath).toLowerCase()
+
   response.statusCode = 200
-  response.setHeader('content-type', CONTENT_TYPES.get(extension) ?? 'application/octet-stream')
+  response.setHeader(
+    'content-type',
+    CONTENT_TYPES.get(extension) ?? 'application/octet-stream'
+  )
   response.setHeader(
     'cache-control',
     pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache'
   )
+
   if (request.method === 'HEAD') {
     response.end()
     return true
   }
+
   await pipeline(createReadStream(filePath), response)
+
   return true
 }
 
@@ -134,6 +158,7 @@ const serveStaticFile = async (request, response, clientDirectory, pathname) => 
 const proxyApiRequest = async (request, response, requestUrl, apiUrl) => {
   const targetUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, apiUrl)
   const upstreamResponse = await fetch(toFetchRequest(request, targetUrl))
+
   await writeFetchResponse(upstreamResponse, response, request.method)
 }
 
@@ -148,49 +173,94 @@ const handleRequest = async (request, response, options) => {
       await proxyApiRequest(request, response, requestUrl, options.apiUrl)
       return
     }
-    if (await serveStaticFile(request, response, options.clientDirectory, requestUrl.pathname)) {
+
+    if (
+      await serveStaticFile(
+        request,
+        response,
+        options.clientDirectory,
+        requestUrl.pathname
+      )
+    ) {
       return
     }
 
     const serverEntry = options.serverEntry ?? (await loadDefaultServerEntry())
-    const rendered = await serverEntry.fetch(toFetchRequest(request, requestUrl))
+    const rendered = await serverEntry.fetch(
+      toFetchRequest(request, requestUrl)
+    )
+
     await writeFetchResponse(rendered, response, request.method)
   } catch (error) {
     log.error({
       event: 'web_request_failed',
       error: error instanceof Error ? error.message : String(error)
     })
+
     if (!response.headersSent) {
       response.statusCode = isProxyPath(requestUrl.pathname) ? 502 : 500
-      response.setHeader('content-type', 'text/plain; charset=utf-8')
+      response.setHeader(
+        'content-type',
+        'text/plain; charset=utf-8'
+      )
     }
-    if (!response.writableEnded) response.end('Request failed.')
+
+    if (!response.writableEnded) {
+      response.end('Request failed.')
+    }
   }
 }
 
 /** Create the production web server with injectable paths. */
 export const createWebServer = (options = {}) => {
   const resolvedOptions = {
-    apiUrl: new URL(options.apiUrl ?? process.env.VIDBEE_API_URL_INTERNAL ?? DEFAULT_API_URL),
-    clientDirectory: options.clientDirectory ?? DEFAULT_CLIENT_DIRECTORY,
+    apiUrl: new URL(
+      options.apiUrl ??
+        process.env.VIDBEE_API_URL_INTERNAL ??
+        DEFAULT_API_URL
+    ),
+    clientDirectory:
+      options.clientDirectory ?? DEFAULT_CLIENT_DIRECTORY,
     serverEntry: options.serverEntry
   }
-  return createServer((request, response) => {
+
+  const server = createServer((request, response) => {
     void handleRequest(request, response, resolvedOptions)
   })
+
+  server.keepAliveTimeout = 120_000
+  server.headersTimeout = 120_000
+
+  return server
 }
 
 /** Return whether this module was launched directly by Node. */
 const isMainModule = () =>
-  Boolean(process.argv[1]) && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+  Boolean(process.argv[1]) &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
 
 if (isMainModule()) {
   const host = process.env.VIDBEE_WEB_HOST?.trim() || '0.0.0.0'
-  const parsedPort = Number.parseInt(process.env.VIDBEE_WEB_PORT ?? '3000', 10)
-  if (!Number.isInteger(parsedPort) || parsedPort <= 0 || parsedPort > 65_535) {
-    throw new Error('VIDBEE_WEB_PORT must be an integer between 1 and 65535.')
+  const parsedPort = Number.parseInt(
+    process.env.VIDBEE_WEB_PORT ?? '3000',
+    10
+  )
+
+  if (
+    !Number.isInteger(parsedPort) ||
+    parsedPort <= 0 ||
+    parsedPort > 65_535
+  ) {
+    throw new Error(
+      'VIDBEE_WEB_PORT must be an integer between 1 and 65535.'
+    )
   }
+
   createWebServer().listen(parsedPort, host, () => {
-    log.info({ event: 'web_listening', host, port: parsedPort })
+    log.info({
+      event: 'web_listening',
+      host,
+      port: parsedPort
+    })
   })
 }
