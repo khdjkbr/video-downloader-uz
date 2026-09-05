@@ -6,31 +6,26 @@ const PLATFORMS = [
 		name: "YouTube",
 		color: "#FF0000",
 		domains: ["youtube.com", "youtu.be"],
-		shortName: "YT",
 	},
 	{
 		name: "TikTok",
 		color: "#000000",
 		domains: ["tiktok.com"],
-		shortName: "TT",
 	},
 	{
 		name: "X",
 		color: "#000000",
 		domains: ["twitter.com", "x.com"],
-		shortName: "X",
 	},
 	{
 		name: "Facebook",
 		color: "#1877F2",
 		domains: ["facebook.com", "fb.watch"],
-		shortName: "f",
 	},
 	{
 		name: "Instagram",
 		color: "#E1306C",
 		domains: ["instagram.com"],
-		shortName: "IG",
 	},
 ] as const;
 
@@ -52,6 +47,119 @@ const getPlatform = (url: string) => {
 	} catch {
 		return null;
 	}
+};
+
+const PlatformIcon = ({
+	name,
+	active,
+}: {
+	name: string;
+	active: boolean;
+}) => {
+	const className = active
+		? "h-7 w-7"
+		: "h-7 w-7 opacity-40 grayscale";
+
+	if (name === "YouTube") {
+		return (
+			<svg
+				viewBox="0 0 24 24"
+				className={className}
+				aria-hidden="true"
+			>
+				<path
+					fill="#FF0000"
+					d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 0 0 .5 6.2 31.2 31.2 0 0 0 0 12a31.2 31.2 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 0 0 2.1-2.1A31.2 31.2 0 0 0 24 12a31.2 31.2 0 0 0-.5-5.8Z"
+				/>
+				<path fill="#fff" d="m9.6 15.7 6.2-3.7-6.2-3.7v7.4Z" />
+			</svg>
+		);
+	}
+
+	if (name === "TikTok") {
+		return (
+			<svg
+				viewBox="0 0 24 24"
+				className={className}
+				aria-hidden="true"
+			>
+				<path
+					fill="#25F4EE"
+					d="M14.8 3h3.1c.3 1.8 1.4 3.2 3.1 4v3.2c-1.2-.1-2.4-.5-3.4-1.1v6.4a6.4 6.4 0 1 1-5.4-6.3v3.3a3.1 3.1 0 1 0 2.3 3V3h.3Z"
+				/>
+				<path
+					fill="#FE2C55"
+					d="M13.5 4.2h3.1c.4 1.5 1.3 2.5 2.7 3.1v3.1a7.7 7.7 0 0 1-2.7-.9v6a6.4 6.4 0 0 1-6.4 6.4A6.3 6.3 0 0 1 7 20.8a6.4 6.4 0 0 0 10.1-5.2V9.2c.8.5 1.7.8 2.7.9V8c-1.5-.6-2.5-1.8-2.9-3.4h-3.4v10.1a3.1 3.1 0 0 1-4.9 2.5 3.1 3.1 0 0 0 5-2.6V4.2Z"
+				/>
+			</svg>
+		);
+	}
+
+	if (name === "X") {
+		return (
+			<svg
+				viewBox="0 0 24 24"
+				className={className}
+				aria-hidden="true"
+			>
+				<path
+					fill="currentColor"
+					d="M18.9 2H22l-6.8 7.8L23.2 22h-6.4l-5-6.5L6.1 22H3l7.3-8.4L2.2 2h6.5l4.5 5.9L18.9 2Zm-1.1 17.7h1.7L7.7 4.2H5.9l11.9 15.5Z"
+				/>
+			</svg>
+		);
+	}
+
+	if (name === "Facebook") {
+		return (
+			<svg
+				viewBox="0 0 24 24"
+				className={className}
+				aria-hidden="true"
+			>
+				<path
+					fill="#1877F2"
+					d="M24 12a12 12 0 1 0-13.9 11.9v-8.4H7.1V12h3V9.3c0-3 1.8-4.7 4.6-4.7 1.3 0 2.7.2 2.7.2v3h-1.5c-1.5 0-2 .9-2 1.9V12h3.4l-.5 3.5h-2.9v8.4A12 12 0 0 0 24 12Z"
+				/>
+			</svg>
+		);
+	}
+
+	return (
+		<svg
+			viewBox="0 0 24 24"
+			className={className}
+			aria-hidden="true"
+		>
+			<defs>
+				<linearGradient id="instagram-gradient" x1="0" y1="1" x2="1" y2="0">
+					<stop offset="0%" stopColor="#FFDC80" />
+					<stop offset="35%" stopColor="#F77737" />
+					<stop offset="65%" stopColor="#E1306C" />
+					<stop offset="100%" stopColor="#833AB4" />
+				</linearGradient>
+			</defs>
+			<rect
+				x="3"
+				y="3"
+				width="18"
+				height="18"
+				rx="5"
+				fill="none"
+				stroke="url(#instagram-gradient)"
+				strokeWidth="2"
+			/>
+			<circle
+				cx="12"
+				cy="12"
+				r="4"
+				fill="none"
+				stroke="url(#instagram-gradient)"
+				strokeWidth="2"
+			/>
+			<circle cx="17.4" cy="6.7" r="1.2" fill="#E1306C" />
+		</svg>
+	);
 };
 
 export const PublicDownloadPage = () => {
@@ -200,43 +308,56 @@ export const PublicDownloadPage = () => {
 
 	return (
 		<main className="min-h-screen bg-background">
-			<div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col items-center px-5 py-16">
+			<div className="mx-auto flex min-h-screen w-full max-w-4xl flex-col items-center px-5 py-16 sm:px-8 sm:py-24">
 				<div className="w-full text-center">
-					<h1 className="text-4xl font-bold tracking-tight">
+					<div className="mb-6 inline-flex items-center rounded-full border px-4 py-2 text-sm text-muted-foreground">
+						Tez, oddiy va qulay
+					</div>
+
+					<h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
 						Videoni yuklab oling
 					</h1>
 
-					<p className="mt-3 text-muted-foreground">
-						YouTube, TikTok, X, Facebook va Instagram
+					<p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
+						Sevimli videolaringizni havola orqali tez va oson
+						yuklab oling.
 					</p>
 				</div>
 
 				<div className="mt-10 w-full">
-					<div className="flex flex-col gap-3 sm:flex-row">
-						<input
-							value={url}
-							onChange={(event) =>
-								handleUrlChange(event.target.value)
-							}
-							onPaste={handlePaste}
-							onKeyDown={(event) => {
-								if (event.key === "Enter") {
-									void handleDownload();
+					<div className="rounded-2xl border bg-background p-2 shadow-sm">
+						<div className="flex flex-col gap-2 sm:flex-row">
+							<input
+								value={url}
+								onChange={(event) =>
+									handleUrlChange(event.target.value)
 								}
-							}}
-							placeholder="Video havolasini shu yerga joylashtiring"
-							className="h-14 flex-1 rounded-xl border bg-background px-5 text-base outline-none transition focus:ring-2 focus:ring-ring"
-						/>
+								onPaste={handlePaste}
+								onKeyDown={(event) => {
+									if (event.key === "Enter") {
+										void handleDownload();
+									}
+								}}
+								placeholder="Video havolasini shu yerga joylashtiring"
+								className="h-14 min-w-0 flex-1 rounded-xl bg-transparent px-4 text-base outline-none placeholder:text-muted-foreground focus:ring-0"
+							/>
 
-						<button
-							type="button"
-							onClick={() => void handleDownload()}
-							disabled={loading}
-							className="h-14 rounded-xl bg-primary px-7 font-medium text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-						>
-							{loading ? "Yuklanmoqda..." : "Yuklab olish"}
-						</button>
+							<button
+								type="button"
+								onClick={() => void handleDownload()}
+								disabled={loading}
+								className="h-14 rounded-xl bg-primary px-7 font-semibold text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+							>
+								{loading
+									? "Yuklanmoqda..."
+									: "Yuklab olish"}
+							</button>
+						</div>
 					</div>
+
+					<p className="mt-3 px-1 text-sm text-muted-foreground">
+						Havolani nusxalang va yuqoridagi maydonga joylashtiring.
+					</p>
 
 					{error && (
 						<p className="mt-3 text-sm text-destructive">
@@ -245,17 +366,19 @@ export const PublicDownloadPage = () => {
 					)}
 
 					{downloadUrl && (
-						<div className="mt-6 rounded-2xl border p-5 text-center">
+						<div className="mt-6 rounded-2xl border p-6 text-center">
 							<p className="text-sm text-muted-foreground">
 								Tayyor:
 							</p>
 
-							<p className="mt-1 font-medium">{fileName}</p>
+							<p className="mt-1 break-all font-medium">
+								{fileName}
+							</p>
 
 							<a
 								href={downloadUrl}
 								download
-								className="mt-4 inline-flex h-11 items-center rounded-xl bg-primary px-6 font-medium text-primary-foreground transition hover:opacity-90"
+								className="mt-5 inline-flex h-12 items-center rounded-xl bg-primary px-7 font-semibold text-primary-foreground transition hover:opacity-90"
 							>
 								Faylni yuklab olish
 							</a>
@@ -263,39 +386,42 @@ export const PublicDownloadPage = () => {
 					)}
 				</div>
 
-				<div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-					{PLATFORMS.map((item) => {
-						const active = platform?.name === item.name;
+				<div className="mt-12 w-full">
+					<p className="mb-4 text-center text-sm font-medium text-muted-foreground">
+						Qo‘llab-quvvatlanadigan platformalar
+					</p>
 
-						return (
-							<div
-								key={item.name}
-								className="flex h-14 min-w-24 items-center justify-center gap-2 rounded-xl border px-4 transition"
-								style={{
-									opacity: active ? 1 : 0.35,
-									color: active ? item.color : undefined,
-								}}
-							>
-								<span
-									className="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold"
+					<div className="flex flex-wrap items-center justify-center gap-3">
+						{PLATFORMS.map((item) => {
+							const active = platform?.name === item.name;
+
+							return (
+								<div
+									key={item.name}
+									className="flex h-14 items-center gap-3 rounded-xl border px-4 transition"
 									style={{
-										backgroundColor: active
-											? `${item.color}18`
-											: "currentColor",
-										color: active
+										opacity: active ? 1 : 0.42,
+										borderColor: active
 											? item.color
 											: undefined,
 									}}
 								>
-									{item.shortName}
-								</span>
+									<PlatformIcon
+										name={item.name}
+										active={active}
+									/>
 
-								<span className="font-medium">
-									{item.name}
-								</span>
-							</div>
-						);
-					})}
+									<span className="font-medium">
+										{item.name}
+									</span>
+								</div>
+							);
+						})}
+					</div>
+				</div>
+
+				<div className="mt-auto pt-16 text-center text-xs text-muted-foreground">
+					Yuklaymiz.uz
 				</div>
 			</div>
 		</main>
