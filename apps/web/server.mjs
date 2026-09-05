@@ -1,6 +1,5 @@
-import { createReadStream } from 'node:fs'
 import { log } from '@vidbee/logger/script'
-import { stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import path from 'node:path'
 import { Readable } from 'node:stream'
@@ -36,20 +35,28 @@ let defaultServerEntryPromise
 
 /** Load the built TanStack Start handler only when an SSR request needs it. */
 const loadDefaultServerEntry = async () => {
-  defaultServerEntryPromise ??= import(DEFAULT_SERVER_ENTRY_URL.href).then((module) => module.default)
+  defaultServerEntryPromise ??= import(DEFAULT_SERVER_ENTRY_URL.href).then(
+    (module) => module.default
+  )
   return defaultServerEntryPromise
 }
 
 /** Return whether a request path belongs to the internal API proxy. */
 const isProxyPath = (pathname) =>
-  PROXY_PATH_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
+  PROXY_PATH_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  )
 
 /** Build fetch-compatible headers without forwarding connection-specific values. */
 const buildForwardHeaders = (request) => {
   const headers = new Headers()
 
   for (const [name, value] of Object.entries(request.headers)) {
-    if (value === undefined || HOP_BY_HOP_HEADERS.has(name.toLowerCase()) || name === 'host') {
+    if (
+      value === undefined ||
+      HOP_BY_HOP_HEADERS.has(name.toLowerCase()) ||
+      name === 'host'
+    ) {
       continue
     }
 
@@ -60,8 +67,14 @@ const buildForwardHeaders = (request) => {
     }
   }
 
-  if (request.headers.host) headers.set('x-forwarded-host', request.headers.host)
-  headers.set('x-forwarded-proto', request.socket.encrypted ? 'https' : 'http')
+  if (request.headers.host) {
+    headers.set('x-forwarded-host', request.headers.host)
+  }
+
+  headers.set(
+    'x-forwarded-proto',
+    request.socket.encrypted ? 'https' : 'http'
+  )
 
   return headers
 }
@@ -113,7 +126,11 @@ const resolveStaticFile = async (clientDirectory, pathname) => {
   const candidate = path.resolve(clientDirectory, `.${decodedPath}`)
   const relativePath = path.relative(clientDirectory, candidate)
 
-  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+  if (
+    !relativePath ||
+    relativePath.startsWith('..') ||
+    path.isAbsolute(relativePath)
+  ) {
     return null
   }
 
@@ -125,52 +142,117 @@ const resolveStaticFile = async (clientDirectory, pathname) => {
 }
 
 /** Serve a built client file and return whether the request was handled. */
-const serveStaticFile = async (request, response, clientDirectory, pathname) => {
-  if (request.method !== 'GET' && request.method !== 'HEAD') return false
+const serveStaticFile = async (
+  request,
+  response,
+  clientDirectory,
+  pathname
+) => {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return false
+  }
 
   const filePath = await resolveStaticFile(clientDirectory, pathname)
 
-  if (!filePath) return false
+  if (!filePath) {
+    return false
+  }
 
   const extension = path.extname(filePath).toLowerCase()
 
   response.statusCode = 200
+
   response.setHeader(
     'content-type',
     CONTENT_TYPES.get(extension) ?? 'application/octet-stream'
   )
+
+  if (pathname.startsWith('/assets/')) {
+    response.setHeader(
+      'cache-control',
+      'public, max-age=31536000, immutable'
+    )
+  } else {
+    response.setHeader(
+      'cache-control',
+      'no-cache'
+    )
+  }
+
   response.setHeader(
-    'cache-control',
-    pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache'
+    'x-content-type-options',
+    'nosniff'
   )
 
   if (request.method === 'HEAD') {
+    const file = await readFile(filePath)
+
+    response.setHeader(
+      'content-length',
+      file.byteLength.toString()
+    )
+
     response.end()
     return true
   }
 
-  await pipeline(createReadStream(filePath), response)
+  const file = await readFile(filePath)
+
+  response.setHeader(
+    'content-length',
+    file.byteLength.toString()
+  )
+
+  response.end(file)
 
   return true
 }
 
 /** Forward API and SSE traffic to the private Compose service. */
-const proxyApiRequest = async (request, response, requestUrl, apiUrl) => {
-  const targetUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, apiUrl)
-  const upstreamResponse = await fetch(toFetchRequest(request, targetUrl))
+const proxyApiRequest = async (
+  request,
+  response,
+  requestUrl,
+  apiUrl
+) => {
+  const targetUrl = new URL(
+    `${requestUrl.pathname}${requestUrl.search}`,
+    apiUrl
+  )
 
-  await writeFetchResponse(upstreamResponse, response, request.method)
+  const upstreamResponse = await fetch(
+    toFetchRequest(request, targetUrl)
+  )
+
+  await writeFetchResponse(
+    upstreamResponse,
+    response,
+    request.method
+  )
 }
 
 /** Handle one web, static, or proxied API request. */
-const handleRequest = async (request, response, options) => {
+const handleRequest = async (
+  request,
+  response,
+  options
+) => {
   const host = request.headers.host ?? 'localhost'
   const protocol = request.socket.encrypted ? 'https' : 'http'
-  const requestUrl = new URL(request.url ?? '/', `${protocol}://${host}`)
+
+  const requestUrl = new URL(
+    request.url ?? '/',
+    `${protocol}://${host}`
+  )
 
   try {
     if (isProxyPath(requestUrl.pathname)) {
-      await proxyApiRequest(request, response, requestUrl, options.apiUrl)
+      await proxyApiRequest(
+        request,
+        response,
+        requestUrl,
+        options.apiUrl
+      )
       return
     }
 
@@ -185,20 +267,35 @@ const handleRequest = async (request, response, options) => {
       return
     }
 
-    const serverEntry = options.serverEntry ?? (await loadDefaultServerEntry())
+    const serverEntry =
+      options.serverEntry ??
+      (await loadDefaultServerEntry())
+
     const rendered = await serverEntry.fetch(
       toFetchRequest(request, requestUrl)
     )
 
-    await writeFetchResponse(rendered, response, request.method)
+    await writeFetchResponse(
+      rendered,
+      response,
+      request.method
+    )
   } catch (error) {
     log.error({
       event: 'web_request_failed',
-      error: error instanceof Error ? error.message : String(error)
+      error:
+        error instanceof Error
+          ? error.message
+          : String(error)
     })
 
     if (!response.headersSent) {
-      response.statusCode = isProxyPath(requestUrl.pathname) ? 502 : 500
+      response.statusCode = isProxyPath(
+        requestUrl.pathname
+      )
+        ? 502
+        : 500
+
       response.setHeader(
         'content-type',
         'text/plain; charset=utf-8'
@@ -220,13 +317,20 @@ export const createWebServer = (options = {}) => {
         DEFAULT_API_URL
     ),
     clientDirectory:
-      options.clientDirectory ?? DEFAULT_CLIENT_DIRECTORY,
+      options.clientDirectory ??
+      DEFAULT_CLIENT_DIRECTORY,
     serverEntry: options.serverEntry
   }
 
-  const server = createServer((request, response) => {
-    void handleRequest(request, response, resolvedOptions)
-  })
+  const server = createServer(
+    (request, response) => {
+      void handleRequest(
+        request,
+        response,
+        resolvedOptions
+      )
+    }
+  )
 
   server.keepAliveTimeout = 120_000
   server.headersTimeout = 120_000
@@ -237,10 +341,16 @@ export const createWebServer = (options = {}) => {
 /** Return whether this module was launched directly by Node. */
 const isMainModule = () =>
   Boolean(process.argv[1]) &&
-  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+  import.meta.url ===
+    pathToFileURL(
+      path.resolve(process.argv[1])
+    ).href
 
 if (isMainModule()) {
-  const host = process.env.VIDBEE_WEB_HOST?.trim() || '0.0.0.0'
+  const host =
+    process.env.VIDBEE_WEB_HOST?.trim() ||
+    '0.0.0.0'
+
   const parsedPort = Number.parseInt(
     process.env.VIDBEE_WEB_PORT ?? '3000',
     10
@@ -256,11 +366,15 @@ if (isMainModule()) {
     )
   }
 
-  createWebServer().listen(parsedPort, host, () => {
-    log.info({
-      event: 'web_listening',
-      host,
-      port: parsedPort
-    })
-  })
+  createWebServer().listen(
+    parsedPort,
+    host,
+    () => {
+      log.info({
+        event: 'web_listening',
+        host,
+        port: parsedPort
+      })
+    }
+  )
 }
