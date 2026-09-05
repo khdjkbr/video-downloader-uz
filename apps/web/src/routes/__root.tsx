@@ -7,7 +7,7 @@ import { Toaster } from "sonner";
 import { i18n } from "../lib/i18n";
 import { applyThemeToDocument, readWebSettings } from "../lib/web-settings";
 
-import appCss from "../styles.css?url";
+import "../styles.css";
 
 export const Route = createRootRoute({
 	head: () => ({
@@ -21,12 +21,6 @@ export const Route = createRootRoute({
 			},
 			{
 				title: "VidBee Web",
-			},
-		],
-		links: [
-			{
-				rel: "stylesheet",
-				href: appCss,
 			},
 		],
 	}),
