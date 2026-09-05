@@ -2,11 +2,36 @@ import { useState } from "react";
 import { orpcClient } from "../../lib/orpc-client";
 
 const PLATFORMS = [
-	{ name: "YouTube", color: "#FF0000", domains: ["youtube.com", "youtu.be"] },
-	{ name: "TikTok", color: "#000000", domains: ["tiktok.com"] },
-	{ name: "X", color: "#000000", domains: ["twitter.com", "x.com"] },
-	{ name: "Facebook", color: "#1877F2", domains: ["facebook.com", "fb.watch"] },
-	{ name: "Instagram", color: "#E1306C", domains: ["instagram.com"] },
+	{
+		name: "YouTube",
+		color: "#FF0000",
+		domains: ["youtube.com", "youtu.be"],
+		shortName: "YT",
+	},
+	{
+		name: "TikTok",
+		color: "#000000",
+		domains: ["tiktok.com"],
+		shortName: "TT",
+	},
+	{
+		name: "X",
+		color: "#000000",
+		domains: ["twitter.com", "x.com"],
+		shortName: "X",
+	},
+	{
+		name: "Facebook",
+		color: "#1877F2",
+		domains: ["facebook.com", "fb.watch"],
+		shortName: "f",
+	},
+	{
+		name: "Instagram",
+		color: "#E1306C",
+		domains: ["instagram.com"],
+		shortName: "IG",
+	},
 ] as const;
 
 const MAX_POLL_TIME = 5 * 60 * 1000;
@@ -38,6 +63,22 @@ export const PublicDownloadPage = () => {
 
 	const platform = getPlatform(url);
 
+	const handleUrlChange = (value: string) => {
+		setUrl(value);
+		setError("");
+		setDownloadUrl("");
+	};
+
+	const handlePaste = (event: React.ClipboardEvent<HTMLInputElement>) => {
+		const pastedText = event.clipboardData.getData("text").trim();
+
+		if (pastedText) {
+			setUrl(pastedText);
+			setError("");
+			setDownloadUrl("");
+		}
+	};
+
 	const handleDownload = async () => {
 		const trimmedUrl = url.trim();
 
@@ -46,7 +87,9 @@ export const PublicDownloadPage = () => {
 			return;
 		}
 
-		if (!platform) {
+		const detectedPlatform = getPlatform(trimmedUrl);
+
+		if (!detectedPlatform) {
 			setError(
 				"Faqat YouTube, TikTok, X, Facebook yoki Instagram havolasi qo‘llab-quvvatlanadi.",
 			);
@@ -172,11 +215,10 @@ export const PublicDownloadPage = () => {
 					<div className="flex flex-col gap-3 sm:flex-row">
 						<input
 							value={url}
-							onChange={(event) => {
-								setUrl(event.target.value);
-								setError("");
-								setDownloadUrl("");
-							}}
+							onChange={(event) =>
+								handleUrlChange(event.target.value)
+							}
+							onPaste={handlePaste}
 							onKeyDown={(event) => {
 								if (event.key === "Enter") {
 									void handleDownload();
@@ -228,13 +270,27 @@ export const PublicDownloadPage = () => {
 						return (
 							<div
 								key={item.name}
-								className="flex h-12 items-center rounded-xl border px-4 transition"
+								className="flex h-14 min-w-24 items-center justify-center gap-2 rounded-xl border px-4 transition"
 								style={{
 									opacity: active ? 1 : 0.35,
 									color: active ? item.color : undefined,
 								}}
 							>
-								<span className="font-semibold">
+								<span
+									className="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold"
+									style={{
+										backgroundColor: active
+											? `${item.color}18`
+											: "currentColor",
+										color: active
+											? item.color
+											: undefined,
+									}}
+								>
+									{item.shortName}
+								</span>
+
+								<span className="font-medium">
 									{item.name}
 								</span>
 							</div>
