@@ -9,6 +9,9 @@ const PLATFORMS = [
 	{ name: "Instagram", color: "#E1306C", domains: ["instagram.com"] },
 ] as const;
 
+const MAX_POLL_TIME = 5 * 60 * 1000;
+const POLL_INTERVAL = 2000;
+
 const getPlatform = (url: string) => {
 	try {
 		const hostname = new URL(url).hostname.toLowerCase();
@@ -58,6 +61,7 @@ export const PublicDownloadPage = () => {
 		try {
 			const result = await orpcClient.downloads.create({
 				url: trimmedUrl,
+				type: "video",
 			});
 
 			const task = result.download;
@@ -66,28 +70,62 @@ export const PublicDownloadPage = () => {
 				throw new Error("Yuklab olish vazifasi yaratilmadi.");
 			}
 
-			const checkStatus = async () => {
-				const response = await orpcClient.downloads.list();
-				const currentTask = response.downloads.find(
+			const startedAt = Date.now();
+
+			const checkStatus = async (): Promise<boolean> => {
+				if (Date.now() - startedAt >= MAX_POLL_TIME) {
+					throw new Error(
+						"Yuklab olish juda uzoq davom etmoqda. Keyinroq qayta urinib ko‘ring.",
+					);
+				}
+
+				const activeResponse = await orpcClient.downloads.list();
+
+				const activeTask = activeResponse.downloads.find(
 					(item) => item.id === task.id,
 				);
 
-				if (!currentTask) {
+				if (activeTask) {
+					if (activeTask.status === "error") {
+						throw new Error(
+							activeTask.error ??
+								"Videoni yuklab olishda xatolik yuz berdi.",
+						);
+					}
+
 					return false;
 				}
 
-				if (currentTask.status === "failed") {
-					throw new Error("Videoni yuklab olishda xatolik yuz berdi.");
+				const historyResponse = await orpcClient.history.list();
+
+				const historyTask = historyResponse.history.find(
+					(item) => item.id === task.id,
+				);
+
+				if (!historyTask) {
+					return false;
 				}
 
-				if (currentTask.status === "completed") {
-					setFileName(currentTask.savedFileName ?? "video");
+				if (historyTask.status === "error") {
+					throw new Error(
+						historyTask.error ??
+							"Videoni yuklab olishda xatolik yuz berdi.",
+					);
+				}
 
+				if (historyTask.status === "cancelled") {
+					throw new Error("Yuklab olish bekor qilindi.");
+				}
+
+				if (historyTask.status === "completed") {
 					const apiBaseUrl =
 						import.meta.env.VITE_API_URL?.replace(/\/$/, "") ??
 						"http://localhost:3100";
 
-					setDownloadUrl(`${apiBaseUrl}/download/${currentTask.id}`);
+					setFileName(historyTask.savedFileName ?? "video");
+					setDownloadUrl(
+						`${apiBaseUrl}/download/${historyTask.id}`,
+					);
 					setLoading(false);
 
 					return true;
@@ -102,7 +140,7 @@ export const PublicDownloadPage = () => {
 				if (!completed) {
 					window.setTimeout(() => {
 						void poll();
-					}, 2000);
+					}, POLL_INTERVAL);
 				}
 			};
 
