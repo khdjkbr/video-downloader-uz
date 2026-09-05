@@ -1,6 +1,9 @@
 import { lookup } from 'node:dns/promises'
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import type { ServerResponse } from 'node:http'
 import net from 'node:net'
+import path from 'node:path'
 import cors from '@fastify/cors'
 import { OpenAPIHandler } from '@orpc/openapi/fastify'
 import { OpenAPIReferencePlugin } from '@orpc/openapi/plugins'
@@ -24,68 +27,91 @@ const isPrivateIpv4 = (ip: string): boolean => {
   }
 
   const [a, b] = octets
+
   if (a === 10) {
     return true
   }
+
   if (a === 127) {
     return true
   }
+
   if (a === 169 && b === 254) {
     return true
   }
+
   if (a === 172 && b >= 16 && b <= 31) {
     return true
   }
+
   if (a === 192 && b === 168) {
     return true
   }
+
   return false
 }
 
 const isPrivateIpv6 = (ip: string): boolean => {
   const normalized = ip.toLowerCase()
+
   if (normalized === '::1') {
     return true
   }
+
   if (normalized.startsWith('fc') || normalized.startsWith('fd')) {
     return true
   }
+
   if (normalized.startsWith('fe80:')) {
     return true
   }
+
   return false
 }
 
 const isBlockedHost = async (url: URL): Promise<boolean> => {
   const hostname = url.hostname.trim().toLowerCase()
+
   if (!hostname) {
     return true
   }
 
-  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname === '0.0.0.0') {
+  if (
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname === '0.0.0.0'
+  ) {
     return true
   }
 
   if (net.isIP(hostname) === 4) {
     return isPrivateIpv4(hostname)
   }
+
   if (net.isIP(hostname) === 6) {
     return isPrivateIpv6(hostname)
   }
 
   try {
-    const records = await lookup(hostname, { all: true, verbatim: true })
+    const records = await lookup(hostname, {
+      all: true,
+      verbatim: true
+    })
+
     if (records.length === 0) {
       return true
     }
+
     for (const record of records) {
       if (record.family === 4 && isPrivateIpv4(record.address)) {
         return true
       }
+
       if (record.family === 6 && isPrivateIpv6(record.address)) {
         return true
       }
     }
+
     return false
   } catch {
     return true
@@ -95,6 +121,7 @@ const isBlockedHost = async (url: URL): Promise<boolean> => {
 const parseRemoteImageUrl = (value: string): URL | null => {
   try {
     const parsed = new URL(value)
+
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return null
     }
@@ -108,6 +135,7 @@ const parseRemoteImageUrl = (value: string): URL | null => {
 export const createApiServer = async () => {
   await startTaskQueue()
   await startApiSubscriptions()
+
   const isDev = process.env.NODE_ENV !== 'production'
 
   const fastify = Fastify({
@@ -121,7 +149,9 @@ export const createApiServer = async () => {
   })
 
   const rpcHandler = new RPCHandler(rpcRouter)
+
   const subscriptionsRpcHandler = new RPCHandler(subscriptionsRouter)
+
   const openApiHandler = new OpenAPIHandler(rpcRouter, {
     plugins: [
       new OpenAPIReferencePlugin({
@@ -147,28 +177,49 @@ export const createApiServer = async () => {
   // task-updated / queue-updated payload shape; we project from internal
   // Task → DownloadTask using the shared projection so both Desktop IPC and
   // API SSE present the same fields for the same task.
-  const NON_TERMINAL = new Set(['queued', 'running', 'processing', 'paused', 'retry-scheduled'])
+  const NON_TERMINAL = new Set([
+    'queued',
+    'running',
+    'processing',
+    'paused',
+    'retry-scheduled'
+  ])
+
   const publishQueueUpdated = (): void => {
     const downloads = taskQueue
       .list({ limit: 200 })
       .tasks.filter((t) => NON_TERMINAL.has(t.status))
       .sort((a, b) => b.createdAt - a.createdAt)
       .map(projectTaskForApi)
+
     sseHub.publish('queue-updated', { downloads })
   }
 
   taskQueue.on('snapshot-changed', (e) => {
-    sseHub.publish('task-updated', { task: projectTaskForApi(e.task) })
+    sseHub.publish('task-updated', {
+      task: projectTaskForApi(e.task)
+    })
+
     publishQueueUpdated()
   })
+
   taskQueue.on('progress', (e) => {
     const t = taskQueue.get(e.taskId)
+
     if (t) {
-      sseHub.publish('task-updated', { task: projectTaskForApi(t) })
+      sseHub.publish('task-updated', {
+        task: projectTaskForApi(t)
+      })
     }
   })
+
   taskQueue.on('transition', (e) => {
-    if (e.to === 'queued' || e.to === 'cancelled' || e.to === 'completed' || e.to === 'failed') {
+    if (
+      e.to === 'queued' ||
+      e.to === 'cancelled' ||
+      e.to === 'completed' ||
+      e.to === 'failed'
+    ) {
       publishQueueUpdated()
     }
   })
@@ -177,124 +228,290 @@ export const createApiServer = async () => {
     return { ok: true }
   })
 
-  fastify.get<{ Querystring: { url?: string } }>('/images/proxy', async (request, reply) => {
-    const sourceUrl = request.query.url?.trim()
-    if (!sourceUrl) {
-      return reply.code(400).send({ message: 'Missing url query parameter.' })
-    }
+  /*
+   * Public file download endpoint.
+   *
+   * The client provides only a download task ID.
+   * The actual file path is taken from the server-side task.
+   */
+  fastify.get<{ Params: { id: string } }>(
+    '/download/:id',
+    async (request, reply) => {
+      const task = taskQueue.get(request.params.id)
 
-    const parsedUrl = parseRemoteImageUrl(sourceUrl)
-    if (!parsedUrl) {
-      return reply.code(400).send({ message: 'Invalid remote image URL.' })
-    }
-
-    let response: Response | null = null
-    let currentUrl = parsedUrl
-
-    for (let redirectCount = 0; redirectCount <= MAX_PROXY_REDIRECTS; redirectCount++) {
-      if (await isBlockedHost(currentUrl)) {
-        return reply.code(400).send({ message: 'Remote host is not allowed.' })
+      if (!task) {
+        return reply.code(404).send({
+          message: 'Download not found.'
+        })
       }
+
+      if (task.status !== 'completed') {
+        return reply.code(409).send({
+          message: 'Download is not completed yet.'
+        })
+      }
+
+      const downloadPath = task.downloadPath?.trim()
+      const savedFileName = task.savedFileName?.trim()
+
+      if (!downloadPath || !savedFileName) {
+        return reply.code(404).send({
+          message: 'Downloaded file is not available.'
+        })
+      }
+
+      const safeFileName = path.basename(savedFileName)
+
+      if (
+        !safeFileName ||
+        safeFileName === '.' ||
+        safeFileName === '..'
+      ) {
+        return reply.code(400).send({
+          message: 'Invalid downloaded file name.'
+        })
+      }
+
+      const basePath = path.resolve(downloadPath)
+      const filePath = path.resolve(basePath, safeFileName)
+      const relativePath = path.relative(basePath, filePath)
+
+      if (
+        !relativePath ||
+        relativePath.startsWith('..') ||
+        path.isAbsolute(relativePath)
+      ) {
+        return reply.code(400).send({
+          message: 'Invalid downloaded file path.'
+        })
+      }
+
+      let fileInfo: Awaited<ReturnType<typeof stat>>
 
       try {
-        response = await fetch(currentUrl.toString(), {
-          signal: AbortSignal.timeout(15_000),
-          redirect: 'manual'
-        })
+        fileInfo = await stat(filePath)
       } catch {
-        return reply.code(502).send({ message: 'Failed to fetch remote image.' })
+        return reply.code(404).send({
+          message: 'Downloaded file was not found.'
+        })
       }
 
-      const locationHeader = response.headers.get('location')
-      const isRedirect =
-        response.status >= 300 &&
-        response.status < 400 &&
-        typeof locationHeader === 'string' &&
-        locationHeader.length > 0
-      if (!isRedirect) {
-        break
+      if (!fileInfo.isFile()) {
+        return reply.code(404).send({
+          message: 'Downloaded file was not found.'
+        })
       }
 
-      currentUrl = new URL(locationHeader, currentUrl)
-      response.body?.cancel()
+      reply.header(
+        'Content-Type',
+        'application/octet-stream'
+      )
+
+      reply.header(
+        'Content-Length',
+        fileInfo.size.toString()
+      )
+
+      reply.header(
+        'Content-Disposition',
+        `attachment; filename*=UTF-8''${encodeURIComponent(safeFileName)}`
+      )
+
+      return reply.send(createReadStream(filePath))
     }
+  )
 
-    if (!response) {
-      return reply.code(502).send({ message: 'Failed to fetch remote image.' })
-    }
+  fastify.get<{ Querystring: { url?: string } }>(
+    '/images/proxy',
+    async (request, reply) => {
+      const sourceUrl = request.query.url?.trim()
 
-    if (!response.ok) {
-      return reply.code(502).send({
-        message: `Remote image request failed with status ${response.status}.`
-      })
-    }
-
-    const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
-    if (!contentType.startsWith('image/')) {
-      return reply.code(415).send({ message: 'Remote resource is not an image.' })
-    }
-
-    const contentLengthHeader = response.headers.get('content-length')
-    if (contentLengthHeader) {
-      const declaredSize = Number.parseInt(contentLengthHeader, 10)
-      if (Number.isFinite(declaredSize) && declaredSize > MAX_PROXY_IMAGE_BYTES) {
-        return reply.code(413).send({ message: 'Remote image is too large.' })
-      }
-    }
-
-    if (!response.body) {
-      return reply.code(502).send({ message: 'Remote image response body is empty.' })
-    }
-
-    const reader = response.body.getReader()
-    const chunks: Buffer[] = []
-    let totalBytes = 0
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) {
-        break
+      if (!sourceUrl) {
+        return reply.code(400).send({
+          message: 'Missing url query parameter.'
+        })
       }
 
-      if (!value) {
-        continue
+      const parsedUrl = parseRemoteImageUrl(sourceUrl)
+
+      if (!parsedUrl) {
+        return reply.code(400).send({
+          message: 'Invalid remote image URL.'
+        })
       }
 
-      totalBytes += value.byteLength
-      if (totalBytes > MAX_PROXY_IMAGE_BYTES) {
-        await reader.cancel()
-        return reply.code(413).send({ message: 'Remote image is too large.' })
+      let response: Response | null = null
+      let currentUrl = parsedUrl
+
+      for (
+        let redirectCount = 0;
+        redirectCount <= MAX_PROXY_REDIRECTS;
+        redirectCount++
+      ) {
+        if (await isBlockedHost(currentUrl)) {
+          return reply.code(400).send({
+            message: 'Remote host is not allowed.'
+          })
+        }
+
+        try {
+          response = await fetch(currentUrl.toString(), {
+            signal: AbortSignal.timeout(15_000),
+            redirect: 'manual'
+          })
+        } catch {
+          return reply.code(502).send({
+            message: 'Failed to fetch remote image.'
+          })
+        }
+
+        const locationHeader = response.headers.get('location')
+
+        const isRedirect =
+          response.status >= 300 &&
+          response.status < 400 &&
+          typeof locationHeader === 'string' &&
+          locationHeader.length > 0
+
+        if (!isRedirect) {
+          break
+        }
+
+        currentUrl = new URL(
+          locationHeader,
+          currentUrl
+        )
+
+        response.body?.cancel()
       }
 
-      chunks.push(Buffer.from(value))
-    }
+      if (!response) {
+        return reply.code(502).send({
+          message: 'Failed to fetch remote image.'
+        })
+      }
 
-    const imageBuffer = Buffer.concat(chunks, totalBytes)
-    const cacheControl = response.headers.get('cache-control')
-    const etag = response.headers.get('etag')
-    const lastModified = response.headers.get('last-modified')
+      if (!response.ok) {
+        return reply.code(502).send({
+          message: `Remote image request failed with status ${response.status}.`
+        })
+      }
 
-    reply.header('Content-Type', contentType)
-    reply.header('Content-Length', imageBuffer.length.toString())
-    reply.header('Cache-Control', cacheControl ?? 'public, max-age=3600')
-    if (etag) {
-      reply.header('ETag', etag)
-    }
-    if (lastModified) {
-      reply.header('Last-Modified', lastModified)
-    }
+      const contentType =
+        response.headers.get('content-type')?.toLowerCase() ?? ''
 
-    return reply.send(imageBuffer)
-  })
+      if (!contentType.startsWith('image/')) {
+        return reply.code(415).send({
+          message: 'Remote resource is not an image.'
+        })
+      }
+
+      const contentLengthHeader =
+        response.headers.get('content-length')
+
+      if (contentLengthHeader) {
+        const declaredSize =
+          Number.parseInt(contentLengthHeader, 10)
+
+        if (
+          Number.isFinite(declaredSize) &&
+          declaredSize > MAX_PROXY_IMAGE_BYTES
+        ) {
+          return reply.code(413).send({
+            message: 'Remote image is too large.'
+          })
+        }
+      }
+
+      if (!response.body) {
+        return reply.code(502).send({
+          message: 'Remote image response body is empty.'
+        })
+      }
+
+      const reader = response.body.getReader()
+      const chunks: Buffer[] = []
+      let totalBytes = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          break
+        }
+
+        if (!value) {
+          continue
+        }
+
+        totalBytes += value.byteLength
+
+        if (totalBytes > MAX_PROXY_IMAGE_BYTES) {
+          await reader.cancel()
+
+          return reply.code(413).send({
+            message: 'Remote image is too large.'
+          })
+        }
+
+        chunks.push(Buffer.from(value))
+      }
+
+      const imageBuffer = Buffer.concat(
+        chunks,
+        totalBytes
+      )
+
+      const cacheControl =
+        response.headers.get('cache-control')
+
+      const etag =
+        response.headers.get('etag')
+
+      const lastModified =
+        response.headers.get('last-modified')
+
+      reply.header(
+        'Content-Type',
+        contentType
+      )
+
+      reply.header(
+        'Content-Length',
+        imageBuffer.length.toString()
+      )
+
+      reply.header(
+        'Cache-Control',
+        cacheControl ?? 'public, max-age=3600'
+      )
+
+      if (etag) {
+        reply.header('ETag', etag)
+      }
+
+      if (lastModified) {
+        reply.header(
+          'Last-Modified',
+          lastModified
+        )
+      }
+
+      return reply.send(imageBuffer)
+    }
+  )
 
   fastify.get('/events', async (request, reply) => {
-    const requestOrigin = request.headers.origin?.trim()
+    const requestOrigin =
+      request.headers.origin?.trim()
+
     const responseHeaders: Record<string, string> = {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
-      'Access-Control-Allow-Origin': requestOrigin || '*'
+      'Access-Control-Allow-Origin':
+        requestOrigin || '*'
     }
 
     if (requestOrigin) {
@@ -302,9 +519,15 @@ export const createApiServer = async () => {
     }
 
     reply.hijack()
-    reply.raw.writeHead(200, responseHeaders)
 
-    const response = reply.raw as ServerResponse
+    reply.raw.writeHead(
+      200,
+      responseHeaders
+    )
+
+    const response =
+      reply.raw as ServerResponse
+
     sseHub.addClient(response)
 
     request.raw.on('close', () => {
@@ -316,32 +539,58 @@ export const createApiServer = async () => {
   // mirrors `subscriptionContract` 1:1 (NEX-132). The match runs before the
   // generic `/rpc/*` handler because Fastify applies the most-specific route
   // wins rule for `/rpc/subscriptions/*`.
-  fastify.all('/rpc/subscriptions/*', async (request, reply) => {
-    await subscriptionsRpcHandler.handle(request, reply, {
-      prefix: '/rpc/subscriptions'
-    })
-  })
+  fastify.all(
+    '/rpc/subscriptions/*',
+    async (request, reply) => {
+      await subscriptionsRpcHandler.handle(
+        request,
+        reply,
+        {
+          prefix: '/rpc/subscriptions'
+        }
+      )
+    }
+  )
 
-  fastify.all('/rpc/*', async (request, reply) => {
-    await rpcHandler.handle(request, reply, {
-      prefix: '/rpc'
-    })
-  })
+  fastify.all(
+    '/rpc/*',
+    async (request, reply) => {
+      await rpcHandler.handle(
+        request,
+        reply,
+        {
+          prefix: '/rpc'
+        }
+      )
+    }
+  )
 
   fastify.all('/docs', async (request, reply) => {
-    await openApiHandler.handle(request, reply, {
-      prefix: '/'
-    })
+    await openApiHandler.handle(
+      request,
+      reply,
+      {
+        prefix: '/'
+      }
+    )
   })
 
-  fastify.all('/openapi.json', async (request, reply) => {
-    await openApiHandler.handle(request, reply, {
-      prefix: '/'
-    })
-  })
+  fastify.all(
+    '/openapi.json',
+    async (request, reply) => {
+      await openApiHandler.handle(
+        request,
+        reply,
+        {
+          prefix: '/'
+        }
+      )
+    }
+  )
 
   fastify.addHook('onClose', async () => {
     sseHub.closeAll()
+
     await stopApiSubscriptions()
     await stopTaskQueue()
   })
