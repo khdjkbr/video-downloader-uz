@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DownloadPage } from "../components/pages/download-page";
+import { PublicDownloadPage } from "../components/pages/public-download-page";
 
 export const Route = createFileRoute("/")({
-	component: DownloadPage,
+	component: PublicDownloadPage,
 });
