@@ -8,10 +8,12 @@ RUN corepack enable
 WORKDIR /app
 
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+
 COPY apps/web/package.json apps/web/package.json
 COPY packages/downloader-core/package.json packages/downloader-core/package.json
 COPY packages/i18n/package.json packages/i18n/package.json
 COPY packages/logger/package.json packages/logger/package.json
+COPY packages/task-queue/package.json packages/task-queue/package.json
 COPY packages/ui/package.json packages/ui/package.json
 
 RUN pnpm install --filter "{./apps/web}..." --frozen-lockfile --ignore-scripts
@@ -20,9 +22,14 @@ COPY apps/web apps/web
 COPY packages/downloader-core packages/downloader-core
 COPY packages/i18n packages/i18n
 COPY packages/logger packages/logger
+COPY packages/task-queue packages/task-queue
 COPY packages/ui packages/ui
 
+ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL}
+
 RUN pnpm --filter ./apps/web run build
+
 RUN mkdir -p /prod/web/node_modules/@vidbee \
   && cp -RL packages/logger /prod/web/node_modules/@vidbee/logger
 
